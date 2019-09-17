@@ -151,72 +151,164 @@ def _get(
 
     return _generate_diff(local, destination, destination, content)
 
-
-def gitlab(
+def gitlab_get(
     task: Task,
     url: str,
     token: str,
     repository: str,
     filename: str,
-    content: str = "",
-    action: str = "create",
-    dry_run: Optional[bool] = None,
-    branch: str = "master",
-    destination: str = "",
-    ref: str = "master",
-    commit_message: str = "",
+    destination: str,
+    ref: str="master",
+    dry_run: bool=False,
+) -> Result:
+    
+    session = requests.session()
+    session.headers.update({"PRIVATE-TOKEN": token})
+
+    pid = _get_repository(session, url, repository)
+
+    diff = _get(
+        task=task,
+        session=session,
+        url=url,
+        pid=pid,
+        filename=filename,
+        destination=destination,
+        ref=ref,
+        dry_run=dry_run
+    )
+
+    return Result(host=task.host, diff=diff, change=bool(diff))
+    
+def gitlab_exists(
+    task: Task,
+    url: str,
+    token: str,
+    repository: str,
+    filename: str,
+    ref: str="master",
+    dry_run: bool=False,
 ) -> Result:
     """
-    Exposes some of the Gitlab API functionality for operations on files
-    in a Gitlab repository.
-
-    Example:
-
-        nornir.run(files.gitlab,
-                   action="create",
-                   url="https://gitlab.localhost.com",
-                   token="ABCD1234",
-                   repository="test",
-                   filename="config",
-                   ref="master")
-
-    Arguments:
-        dry_run: Whether to apply changes or not
-        url: Gitlab instance URL
-        token: Personal access token
-        repository: source/destination repository
-        filename: source/destination file name
-        content: content to write
-        action: ``create``, ``update``, ``get``
-        branch: destination branch
-        destination: local destination filename (only used in get action)
-        ref: branch, commit hash or tag (only used in get action)
-        commit_message: commit message
-
-    Returns:
-        Result object with the following attributes set:
-            * changed (``bool``):
-            * diff (``str``): unified diff
-
+    Checks if a file exists in a repository
     """
-    dry_run = dry_run if dry_run is not None else task.is_dry_run()
+    session = requests.session()
+    session.headers.update({"PRIVATE-TOKEN": token})
+
+    pid = _get_repository(session, url, repository)
+
+    (status, content) = _remote_exists(task, session, url, pid, filename, ref)
+
+    return Result(host=task.host, result = status)
+
+def gitlab_update(
+    task: Task,
+    url: str,
+    token: str,
+    repository: str,
+    filename: str,
+    content: str,
+    branch: str="master",
+    dry_run: bool=False, 
+    commit_message: str=""
+) -> Result:
+    """
+    Updates a file in a giltab repository
+    """
+    session = requests.session()
+    session.headers.update({"PRIVATE-TOKEN": token})
+
+    pid = _get_repository(session, url, repository)
+
+    diff = _update(task, session, url, pid, filename, content, branch, commit_message, dry_run)
+        
+    return Result(host=task.host, diff=diff, changed=bool(diff))
+        
+def gitlab_create(
+    task: Task,
+    url: str,
+    token: str,
+    repository: str,
+    filename: str,
+    content: str,
+    dry_run: bool = False,
+    branch: str = "master",
+    commit_message: str ="",
+    
+) -> Result:
+    """
+    Creates a file in a gitlab repository
+    """
 
     session = requests.session()
     session.headers.update({"PRIVATE-TOKEN": token})
 
-    if commit_message == "":
-        commit_message = "File created with nornir"
-
     pid = _get_repository(session, url, repository)
 
-    if action == "create":
-        diff = _create(
-            task, session, url, pid, filename, content, branch, commit_message, dry_run
-        )
-    elif action == "update":
-        diff = _update(
-            task, session, url, pid, filename, content, branch, commit_message, dry_run
-        )
-    elif action == "get":
-        diff = _get(task, session, url, pid, filename, destination, ref, dry_run)
-    return Result(host=task.host, diff=diff, changed=bool(diff))
+    diff = _create(task, session, url, pid, filename, content, branch, commit_message, dry_run)
+
+    return Result(host=task.host, diff = diff, changed=bool(diff))
+    
+#def gitlab(
+    #task: Task,
+    #url: str,
+    #token: str,
+    #repository: str,
+    #filename: str,
+    #content: str = "",
+    #action: str = "create",
+    #dry_run: Optional[bool] = None,
+    #branch: str = "master",
+    #destination: str = "",
+    #ref: str = "master",
+    #commit_message: str = "",
+#) -> Result:
+    #"""
+    #Exposes some of the Gitlab API functionality for operations on files
+    #in a Gitlab repository.
+#
+    #Example:
+#
+        #nornir.run(files.gitlab,
+                   #action="create",
+                   #url="https://gitlab.localhost.com",
+                   #token="ABCD1234",
+                   #repository="test",
+                   #filename="config",
+                   #ref="master")
+#
+    #Arguments:
+        #dry_run: Whether to apply changes or not
+        #url: Gitlab instance URL
+        #token: Personal access token
+        #repository: source/destination repository
+        #filename: source/destination file name
+        #content: content to write
+        #action: ``create``, ``update``, ``get``
+        #branch: destination branch
+        #destination: local destination filename (only used in get action)
+        #ref: branch, commit hash or tag (only used in get action)
+        #commit_message: commit message
+#
+    #Returns:
+        #Result object with the following attributes set:
+            #* changed (``bool``):
+            #* diff (``str``): unified diff
+#
+    #"""
+    #dry_run = dry_run if dry_run is not None else task.is_dry_run()
+#
+    #session = requests.session()
+    #session.headers.update({"PRIVATE-TOKEN": token})
+#
+    #if commit_message == "":
+        #commit_message = "File created with nornir"
+#
+    #pid = _get_repository(session, url, repository)
+#
+    #if action == "create":
+        #diff = _create(
+            #task, session, url, pid, filename, content, branch, commit_message, dry_run
+        #)
+    #return Result(host=task.host, diff=diff, changed=bool(diff))
+

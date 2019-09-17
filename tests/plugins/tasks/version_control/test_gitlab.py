@@ -1,7 +1,8 @@
 import os
 import uuid
 
-from nornir.plugins.tasks.version_control import gitlab
+from nornir.plugins.tasks.version_control import gitlab_create
+from nornir.plugins.tasks.version_control import gitlab_update
 
 
 BASE_PATH = os.path.join(os.path.dirname(__file__), "gitlab")
@@ -41,7 +42,6 @@ def create_file(
     branch,
     filename,
     content,
-    action,
     dry_run,
     commit_message,
     status_code,
@@ -58,13 +58,12 @@ def create_file(
     requests_mock.post(create_file_url, status_code=status_code, json=resp)
 
     res = nornir.run(
-        gitlab,
+        task=gitlab_create,
         url=url,
         token=token,
         repository=repository,
         filename=filename,
         content=content,
-        action="create",
         dry_run=dry_run,
         branch=branch,
         commit_message=commit_message,
@@ -104,15 +103,14 @@ def update_file(
     requests_mock.put(update_file_url, status_code=status_code, json=resp)
 
     res = nornir.run(
-        gitlab,
+        gitlab_update,
         url=url,
         token=token,
         repository=repository,
         filename=filename,
         content=content,
-        action="update",
-        dry_run=dry_run,
         branch=branch,
+        dry_run=dry_run,
         commit_message=commit_message,
     )
     return res
@@ -170,7 +168,6 @@ class Test(object):
             branch="master",
             filename="dummy",
             content="dummy",
-            action="create",
             dry_run=True,
             commit_message="commit",
             status_code=201,
@@ -194,7 +191,6 @@ class Test(object):
             branch="master",
             filename="dummy",
             content="dummy",
-            action="create",
             dry_run=False,
             commit_message="commit",
             status_code=201,
@@ -218,7 +214,6 @@ class Test(object):
             branch="master",
             filename="dummy",
             content="dummy",
-            action="create",
             dry_run=False,
             commit_message="commit",
             status_code=400,
@@ -241,7 +236,6 @@ class Test(object):
             branch="master",
             filename="dummy",
             content="dummy",
-            action="create",
             dry_run=False,
             commit_message="commit",
             status_code=201,
@@ -264,7 +258,6 @@ class Test(object):
             branch="bar",
             filename="dummy",
             content="dummy",
-            action="create",
             dry_run=False,
             commit_message="commit",
             status_code=400,
