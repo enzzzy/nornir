@@ -1,8 +1,8 @@
 import os
 import uuid
+import urllib.parse
 
-from nornir.plugins.tasks.version_control import gitlab_create
-from nornir.plugins.tasks.version_control import gitlab_update
+from nornir.plugins.tasks.version_control import gitlab_create, gitlab_update, gitlab_get, gitlab_exists
 
 
 BASE_PATH = os.path.join(os.path.dirname(__file__), "gitlab")
@@ -33,14 +33,50 @@ diff_get = """--- /tmp/{f}
 +content"""
 
 
-def create_file(
+def _exits(
+    nornir,
+    requests_mock,
+    url,
+    repository,
+    file_path,
+    ref,
+    dry_run,
+    pid,
+    status_code,
+    project_status_code,
+    project_resp,
+    resp,
+):
+    token = "dummy"
+    
+    repo_url = f"{url}/api/v4/projects?search={repository}"
+    requests_mock.get(repo_url, status_code=project_status_code, json=project_resp)
+
+    quoted_file_path = urllib.parse.quote(file_path, safe="")
+    exists_url = f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}?ref={ref}"
+    requests.mock.get(exists_url, status_code=status_code, json=resp)
+
+    res = nornir.run(
+        task=gitlab_exists,
+        url=url,
+        token=token,
+        repository=repository,
+        file_path=file_path,
+        ref=ref,
+        dry_run=dry_run
+    )
+
+    return res
+                
+        
+def _create_file(
     nornir,
     requests_mock,
     url,
     repository,
     pid,
     branch,
-    filename,
+    file_path,
     content,
     dry_run,
     commit_message,
@@ -54,7 +90,8 @@ def create_file(
     repo_url = f"{url}/api/v4/projects?search={repository}"
     requests_mock.get(repo_url, status_code=project_status_code, json=project_resp)
 
-    create_file_url = f"{url}/api/v4/projects/{pid}/repository/files/{filename}"
+    quoted_file_path = urllib.parse.quote(file_path, safe="")
+    create_file_url = f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}"
     requests_mock.post(create_file_url, status_code=status_code, json=resp)
 
     res = nornir.run(
@@ -62,7 +99,7 @@ def create_file(
         url=url,
         token=token,
         repository=repository,
-        filename=filename,
+        file_path=file_path,
         content=content,
         dry_run=dry_run,
         branch=branch,
@@ -71,14 +108,14 @@ def create_file(
     return res
 
 
-def update_file(
+def _update_file(
     nornir,
     requests_mock,
     url,
     repository,
     pid,
     branch,
-    filename,
+    file_path,
     content,
     dry_run,
     commit_message,
@@ -94,12 +131,13 @@ def update_file(
     repo_url = f"{url}/api/v4/projects?search={repository}"
     requests_mock.get(repo_url, status_code=project_status_code, json=project_resp)
 
+    quoted_file_path = urllib.parse.quote(file_path, safe="")
     exists_file_url = (
-        f"{url}/api/v4/projects/{pid}/repository/files/{filename}?ref={branch}"
+        f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}?ref={branch}"
     )
     requests_mock.get(exists_file_url, status_code=exists_status_code, json=exists_resp)
 
-    update_file_url = f"{url}/api/v4/projects/{pid}/repository/files/{filename}"
+    update_file_url = f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}"
     requests_mock.put(update_file_url, status_code=status_code, json=resp)
 
     res = nornir.run(
@@ -107,7 +145,7 @@ def update_file(
         url=url,
         token=token,
         repository=repository,
-        filename=filename,
+        file_path=file_path,
         content=content,
         branch=branch,
         dry_run=dry_run,
@@ -116,13 +154,13 @@ def update_file(
     return res
 
 
-def get_file(
+def _get_file(
     nornir,
     requests_mock,
     url,
     repository,
     pid,
-    filename,
+    file_path,
     destination,
     dry_run,
     project_status_code,
@@ -136,37 +174,39 @@ def get_file(
     repo_url = f"{url}/api/v4/projects?search={repository}"
     requests_mock.get(repo_url, status_code=project_status_code, json=project_resp)
 
+    quoted_file_path = urllib.parse.quote(file_path, safe="")
     exists_file_url = (
-        f"{url}/api/v4/projects/{pid}/repository/files/{filename}?ref={ref}"
+        f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}?ref={ref}"
     )
 
     requests_mock.get(exists_file_url, status_code=exists_status_code, json=exists_resp)
 
     res = nornir.run(
-        gitlab,
+        gitlab_get,
         url=url,
         token=token,
         repository=repository,
-        filename=filename,
+        file_path=file_path,
         destination=destination,
-        action="get",
-        dry_run=dry_run,
         ref=ref,
+        dry_run=dry_run,
     )
     return res
 
+def _exists(nornir, requests_mock, url, repository, pid, file_path, dry_run):
+    pass
 
 class Test(object):
     def test_gitlab_create_dry_run(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = create_file(
+        res = _create_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="dummy",
             dry_run=True,
             commit_message="commit",
@@ -182,14 +222,14 @@ class Test(object):
 
     def test_gitlab_create(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = create_file(
+        res = _create_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="dummy",
             dry_run=False,
             commit_message="commit",
@@ -205,14 +245,14 @@ class Test(object):
 
     def test_gitlab_create_file_exists(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = create_file(
+        res = _create_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="dummy",
             dry_run=False,
             commit_message="commit",
@@ -227,14 +267,14 @@ class Test(object):
 
     def test_gitlab_create_invalid_project(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = create_file(
+        res = _create_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="dummy",
             dry_run=False,
             commit_message="commit",
@@ -249,14 +289,14 @@ class Test(object):
 
     def test_gitlab_create_invalid_branch(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = create_file(
+        res = _create_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="bar",
-            filename="dummy",
+            file_path="dummy",
             content="dummy",
             dry_run=False,
             commit_message="commit",
@@ -271,14 +311,14 @@ class Test(object):
 
     def test_gitlab_update_dry_run(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = update_file(
+        res = _update_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="new line",
             dry_run=True,
             commit_message="commit",
@@ -296,14 +336,14 @@ class Test(object):
 
     def test_gitlab_update(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = update_file(
+        res = _update_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="new line",
             dry_run=False,
             commit_message="commit",
@@ -320,14 +360,14 @@ class Test(object):
 
     def test_gitlab_update_invalid_project(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = update_file(
+        res = _update_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="dummy",
+            file_path="dummy",
             content="new line",
             dry_run=False,
             commit_message="commit",
@@ -343,14 +383,14 @@ class Test(object):
 
     def test_gitlab_update_invalid_branch(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = update_file(
+        res = _update_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="bar",
-            filename="dummy",
+            file_path="dummy",
             content="new line",
             dry_run=False,
             commit_message="commit",
@@ -366,14 +406,14 @@ class Test(object):
 
     def test_gitlab_update_invalid_file(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = update_file(
+        res = _update_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
             branch="master",
-            filename="bar",
+            file_path="bar",
             content="new line",
             dry_run=False,
             commit_message="commit",
@@ -390,13 +430,13 @@ class Test(object):
     def test_gitlab_get_dry_run(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
         u = uuid.uuid4()
-        res = get_file(
+        res = _get_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
-            filename="bar",
+            file_path="bar",
             dry_run=True,
             destination=f"/tmp/{u}",
             project_status_code=200,
@@ -414,13 +454,13 @@ class Test(object):
     def test_gitlab_get(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
         u = uuid.uuid4()
-        res = get_file(
+        res = _get_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
-            filename="bar",
+            file_path="bar",
             dry_run=False,
             destination=f"/tmp/{u}",
             project_status_code=200,
@@ -437,13 +477,13 @@ class Test(object):
 
     def test_gitlab_get_invalid_project(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = get_file(
+        res = _get_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=2,
-            filename="bar",
+            file_path="bar",
             dry_run=False,
             destination="/tmp/foo",
             project_status_code=400,
@@ -458,13 +498,13 @@ class Test(object):
 
     def test_gitlab_get_invalid_branch(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = get_file(
+        res = _get_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
-            filename="bar",
+            file_path="bar",
             dry_run=False,
             destination="/tmp/foo",
             project_status_code=200,
@@ -479,13 +519,13 @@ class Test(object):
 
     def test_gitlab_get_invalid_file(self, nornir, requests_mock):
         nornir = nornir.filter(name="dev1.group_1")
-        res = get_file(
+        res = _get_file(
             nornir=nornir,
             requests_mock=requests_mock,
             url="http://localhost",
             repository="test",
             pid=1,
-            filename="baz",
+            file_path="baz",
             dry_run=False,
             destination="/tmp/foo",
             project_status_code=200,
@@ -497,3 +537,17 @@ class Test(object):
 
         assert res["dev1.group_1"][0].failed
         assert not res["dev1.group_1"][0].changed
+
+    def test_gitlab_exists(self, nornir, requests_mock):
+        pass
+#        nornir = nornir.filter(name="dev1.group_1")
+#        rest = _exits(
+#            nornir = nornir,
+#            requets_mock = requests_mock,
+#            url="http://localhost",
+#            repository="test",
+#            pid=1,
+#            file_path="baz",
+#            dry_run=False,
+#        )
+

@@ -1,6 +1,8 @@
 import base64
 import difflib
 import threading
+import urllib.parse
+
 from pathlib import Path
 from typing import Tuple
 
@@ -42,10 +44,11 @@ def _get_repository(session: requests.Session, url: str, repository: str) -> int
 
 
 def _remote_exists(
-    task: Task, session: requests.Session, url: str, pid: int, filename: str, ref: str
+    task: Task, session: requests.Session, url: str, pid: int, file_path: str, ref: str
 ) -> Tuple[bool, str]:
+    file_path = urllib.parse.quote(file_path, safe="")
     resp = session.get(
-        f"{url}/api/v4/projects/{pid}/repository/files/{filename}?ref={ref}"
+        f"{url}/api/v4/projects/{pid}/repository/files/{file_path}?ref={ref}"
     )
     if resp.status_code == 200:
         return (
@@ -55,9 +58,9 @@ def _remote_exists(
     return (False, "")
 
 
-def _local_exists(task: Task, filename: str) -> Tuple[bool, str]:
+def _local_exists(task: Task, file_path: str) -> Tuple[bool, str]:
     try:
-        with open(Path(filename)) as f:
+        with open(Path(file_path)) as f:
             content = f.read()
         return (True, content)
     except FileNotFoundError:
@@ -69,23 +72,24 @@ def _create(
     session: requests.Session,
     url: str,
     pid: int,
-    filename: str,
+    file_path: str,
     content: str,
     branch: str,
     commit_message: str,
     dry_run: bool,
 ) -> str:
     if dry_run:
-        return _generate_diff("", "", filename, content)
+        return _generate_diff("", "", file_path, content)
 
+    quoted_file_path = urllib.parse.quote(file_path, safe="")
     with LOCK:
-        url = f"{url}/api/v4/projects/{pid}/repository/files/{filename}"
+        url = f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}"
         data = {"branch": branch, "content": content, "commit_message": commit_message}
         resp = session.post(url, data=data)
 
         if resp.status_code != 201:
-            raise RuntimeError(f"Unable to create file: {filename}!")
-    return _generate_diff("", "", filename, content)
+            raise RuntimeError(f"Unable to create file: {file_path}!")
+    return _generate_diff("", "", file_path, content)
 
 
 def _update(
@@ -93,23 +97,24 @@ def _update(
     session: requests.Session,
     url: str,
     pid: int,
-    filename: str,
+    file_path: str,
     content: str,
     branch: str,
     commit_message: str,
     dry_run: bool,
 ) -> str:
-    exists, original = _remote_exists(task, session, url, pid, filename, branch)
+    exists, original = _remote_exists(task, session, url, pid, file_path, branch)
 
     if not exists:
-        raise RuntimeError(f"File '{filename}' does not exist!")
+        raise RuntimeError(f"File '{file_path}' does not exist!")
 
     if dry_run:
-        return _generate_diff(original, filename, filename, content)
+        return _generate_diff(original, file_path, file_path, content)
 
+    quoted_file_path = urllib.parse.quote(file_path, safe="")
     if original != content:
         with LOCK:
-            url = f"{url}/api/v4/projects/{pid}/repository/files/{filename}"
+            url = f"{url}/api/v4/projects/{pid}/repository/files/{quoted_file_path}"
             data = {
                 "branch": branch,
                 "content": content,
@@ -117,8 +122,8 @@ def _update(
             }
             resp = session.put(url=url, data=data)
             if resp.status_code != 200:
-                raise RuntimeError(f"Unable to update file: {filename}")
-    return _generate_diff(original, filename, filename, content)
+                raise RuntimeError(f"Unable to update file: {file_path}")
+    return _generate_diff(original, file_path, file_path, content)
 
 
 def _get(
@@ -126,7 +131,7 @@ def _get(
     session: requests.Session,
     url: str,
     pid: int,
-    filename: str,
+    file_path: str,
     destination: str,
     ref: str,
     dry_run: bool,
@@ -135,14 +140,14 @@ def _get(
     # if destination is not provided, use the filename as destination in current
     # directory
     if destination == "":
-        destination = filename
+        destination = file_path
 
     (_, local) = _local_exists(task, destination)
 
-    (status, content) = _remote_exists(task, session, url, pid, filename, ref)
+    (status, content) = _remote_exists(task, session, url, pid, file_path, ref)
 
     if not status:
-        raise RuntimeError(f"Unable to get file: {filename}")
+        raise RuntimeError(f"Unable to get file: {file_path}")
 
     if not dry_run:
         if local != content:
@@ -156,7 +161,7 @@ def gitlab_get(
     url: str,
     token: str,
     repository: str,
-    filename: str,
+    file_path: str,
     destination: str,
     ref: str="master",
     dry_run: bool=False,
@@ -172,22 +177,21 @@ def gitlab_get(
         session=session,
         url=url,
         pid=pid,
-        filename=filename,
+        file_path=file_path,
         destination=destination,
         ref=ref,
         dry_run=dry_run
     )
 
-    return Result(host=task.host, diff=diff, change=bool(diff))
+    return Result(host=task.host, diff=diff, changed=bool(diff))
     
 def gitlab_exists(
     task: Task,
     url: str,
     token: str,
     repository: str,
-    filename: str,
+    file_path: str,
     ref: str="master",
-    dry_run: bool=False,
 ) -> Result:
     """
     Checks if a file exists in a repository
@@ -197,7 +201,7 @@ def gitlab_exists(
 
     pid = _get_repository(session, url, repository)
 
-    (status, content) = _remote_exists(task, session, url, pid, filename, ref)
+    (status, content) = _remote_exists(task, session, url, pid, file_path, ref)
 
     return Result(host=task.host, result = status)
 
@@ -206,7 +210,7 @@ def gitlab_update(
     url: str,
     token: str,
     repository: str,
-    filename: str,
+    file_path: str,
     content: str,
     branch: str="master",
     dry_run: bool=False, 
@@ -220,7 +224,7 @@ def gitlab_update(
 
     pid = _get_repository(session, url, repository)
 
-    diff = _update(task, session, url, pid, filename, content, branch, commit_message, dry_run)
+    diff = _update(task, session, url, pid, file_path, content, branch, commit_message, dry_run)
         
     return Result(host=task.host, diff=diff, changed=bool(diff))
         
@@ -229,7 +233,7 @@ def gitlab_create(
     url: str,
     token: str,
     repository: str,
-    filename: str,
+    file_path: str,
     content: str,
     dry_run: bool = False,
     branch: str = "master",
@@ -245,7 +249,7 @@ def gitlab_create(
 
     pid = _get_repository(session, url, repository)
 
-    diff = _create(task, session, url, pid, filename, content, branch, commit_message, dry_run)
+    diff = _create(task, session, url, pid, file_path, content, branch, commit_message, dry_run)
 
     return Result(host=task.host, diff = diff, changed=bool(diff))
     
